@@ -1,6 +1,7 @@
 import json
 import time
 from collections.abc import Generator
+from copy import deepcopy
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -15,6 +16,7 @@ from dify_plugin.entities.model.llm import (
 from dify_plugin.entities.model.message import (
     AssistantPromptMessage,
     PromptMessage,
+    PromptMessageContentType,
     SystemPromptMessage,
     UserPromptMessage,
 )
@@ -442,3 +444,47 @@ Please start by examining the repository structure and then proceed with generat
                 }
             }
         )
+
+    def _clear_user_prompt_image_messages(
+        self, prompt_messages: list[PromptMessage]
+    ) -> list[PromptMessage]:
+        """
+        As for now, gpt supports both fc and vision at the first iteration.
+        We need to remove the image messages from the prompt messages at the first iteration.
+        """
+        prompt_messages = deepcopy(prompt_messages)
+
+        for prompt_message in prompt_messages:
+            if isinstance(prompt_message, UserPromptMessage) and isinstance(
+                prompt_message.content, list
+            ):
+                prompt_message.content = "\n".join(
+                    [
+                        content.data
+                        if content.type == PromptMessageContentType.TEXT
+                        else "[image]"
+                        if content.type == PromptMessageContentType.IMAGE
+                        else "[file]"
+                        for content in prompt_message.content
+                    ]
+                )
+
+        return prompt_messages
+
+    def _organize_prompt_messages(
+        self,
+        history_prompt_messages: list[PromptMessage],
+        current_thoughts: list[PromptMessage],
+    ) -> list[PromptMessage]:
+        """
+        Organize prompt messages for DeepWiki analysis.
+        Combines history messages with current thoughts and clears image messages after first iteration.
+        """
+        prompt_messages = [
+            *history_prompt_messages,
+            *current_thoughts,
+        ]
+        if len(current_thoughts) != 0:
+            # clear messages after the first iteration
+            prompt_messages = self._clear_user_prompt_image_messages(prompt_messages)
+        return prompt_messages
