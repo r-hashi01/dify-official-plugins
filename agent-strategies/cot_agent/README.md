@@ -1,5 +1,5 @@
 # Overview
-The Agent node in Dify Chatflow/Workflow lets LLMs autonomously use tools. This plugin features two official Dify Agent reasoning strategies, enabling LLMs to dynamically select and run tools during runtime for multi-step problem-solving.
+The Agent node in Dify Chatflow/Workflow lets LLMs autonomously use tools. This plugin features three official Dify Agent reasoning strategies, enabling LLMs to dynamically select and run tools during runtime for multi-step problem-solving.
 
 ## Strategies
 
@@ -22,3 +22,19 @@ ReAct alternates between the LLM reasoning about the situation and taking action
 - **Leverages External Information:** Effectively uses external tools to gather information for tasks the model cannot handle alone.
 - **Explainable Reasoning:** Interwoven reasoning and action steps allow some tracking of the Agent's process.
 - **Wide Applicability:** Suitable for tasks requiring external knowledge or specific actions, such as Q&A, information retrieval, and task execution.
+
+### 3. DeepWiki
+DeepWiki is an AI-powered documentation generator that automatically creates comprehensive wikis for GitHub, GitLab, and Bitbucket repositories. It analyzes repository structure, understands code relationships, and generates professional documentation with visual diagrams.
+
+#### Features:
+- **Multi-Platform Support:** Works with GitHub, GitLab, and Bitbucket repositories
+- **Private Repository Access:** Supports personal access tokens for private repositories
+- **Intelligent Analysis:** Configurable depth from basic to comprehensive analysis
+- **Visual Documentation:** Optional Mermaid diagram generation for code relationships
+- **Iterative Processing:** Multi-iteration analysis for thorough understanding
+
+#### Pros:
+- **Comprehensive Documentation:** Generates complete wikis including setup, usage, and architecture
+- **Visual Representation:** Creates diagrams to illustrate code structure and relationships
+- **Flexible Configuration:** Supports different analysis depths and customization options
+- **Professional Output:** Produces documentation suitable for technical teams and end users

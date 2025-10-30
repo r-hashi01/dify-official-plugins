@@ -13,6 +13,7 @@ identity:
 strategies:
   - strategies/function_calling.yaml
   - strategies/ReAct.yaml
+  - strategies/deepwiki.yaml
 extra:
   python:
     source: provider/agent.py

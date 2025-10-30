@@ -1,0 +1,119 @@
+identity:
+  name: deepwiki
+  author: Dify
+  label:
+    en_US: DeepWiki
+    zh_Hans: DeepWiki
+    ja_JP: DeepWiki
+description:
+  en_US: DeepWiki is an AI-powered wiki generator strategy that automatically creates comprehensive documentation for GitHub/GitLab/Bitbucket repositories.
+  zh_Hans: DeepWiki 是一个AI驱动的Wiki生成策略，可自动为GitHub/GitLab/Bitbucket仓库创建全面的文档。
+  ja_JP: DeepWikiは、GitHub/GitLab/Bitbucketリポジトリの包括的なドキュメントを自動生成するAI駆動のWiki生成戦略です。
+features:
+  - history-messages
+parameters:
+  - name: model
+    type: model-selector
+    scope: tool-call&llm
+    required: true
+    label:
+      en_US: Model
+      zh_Hans: 模型
+      ja_JP: モデル
+  - name: tools
+    type: array[tools]
+    required: true
+    label:
+      en_US: Tool list
+      zh_Hans: 工具列表
+      ja_JP: ツールリスト
+  - name: instruction
+    type: string
+    required: true
+    label:
+      en_US: Instruction
+      zh_Hans: 指令
+      ja_JP: 指示
+    auto_generate:
+      type: prompt_instruction
+    template:
+      enabled: true
+  - name: repository_url
+    type: string
+    required: true
+    label:
+      en_US: Repository URL
+      zh_Hans: 仓库URL
+      ja_JP: リポジトリURL
+    description:
+      en_US: GitHub, GitLab, or Bitbucket repository URL to analyze
+      zh_Hans: 要分析的GitHub、GitLab或Bitbucket仓库URL
+      ja_JP: 分析するGitHub、GitLab、またはBitbucketリポジトリURL
+  - name: access_token
+    type: string
+    required: false
+    label:
+      en_US: Access Token
+      zh_Hans: 访问令牌
+      ja_JP: アクセストークン
+    description:
+      en_US: Personal access token for private repositories (optional)
+      zh_Hans: 私有仓库的个人访问令牌（可选）
+      ja_JP: プライベートリポジトリ用の個人アクセストークン（オプション）
+  - name: analysis_depth
+    type: string
+    required: false
+    default: "standard"
+    label:
+      en_US: Analysis Depth
+      zh_Hans: 分析深度
+      ja_JP: 分析の深さ
+    description:
+      en_US: Level of analysis depth (basic, standard, comprehensive)
+      zh_Hans: 分析深度级别（基础、标准、全面）
+      ja_JP: 分析の深さレベル（基本、標準、包括的）
+    options:
+      - value: "basic"
+        label:
+          en_US: Basic
+          zh_Hans: 基础
+          ja_JP: 基本
+      - value: "standard"
+        label:
+          en_US: Standard
+          zh_Hans: 标准
+          ja_JP: 標準
+      - value: "comprehensive"
+        label:
+          en_US: Comprehensive
+          zh_Hans: 全面
+          ja_JP: 包括的
+  - name: include_diagrams
+    type: boolean
+    required: false
+    default: true
+    label:
+      en_US: Include Diagrams
+      zh_Hans: 包含图表
+      ja_JP: 図表を含む
+    description:
+      en_US: Generate Mermaid diagrams to visualize code relationships
+      zh_Hans: 生成Mermaid图表以可视化代码关系
+      ja_JP: コード関係を視覚化するMermaid図表を生成
+  - name: maximum_iterations
+    type: number
+    required: true
+    label:
+      en_US: Maximum Iterations
+      zh_Hans: 最大迭代次数
+      ja_JP: 最大反復回数
+    default: 5
+    min: 1
+    max: 10
+    description:
+      en_US: Maximum number of analysis iterations
+      zh_Hans: 最大分析迭代次数
+      ja_JP: 最大分析反復回数
+extra:
+  python:
+    source: strategies/deepwiki.py
