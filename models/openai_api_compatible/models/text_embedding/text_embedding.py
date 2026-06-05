@@ -36,6 +36,7 @@ from dify_plugin.interfaces.model.openai_compatible.text_embedding import (
 from dify_plugin.entities.model.text_embedding import (
     MultiModalContent,
     MultiModalContentType,
+    MultiModalEmbeddingResult,
 )
 
 
@@ -749,12 +750,31 @@ class OpenAITextEmbeddingModel(OAICompatEmbeddingModel):
         inputs: list,
         user: Optional[str] = None,
         input_type: EmbeddingInputType = EmbeddingInputType.DOCUMENT,
-    ) -> TextEmbeddingResult:
+    ):
         """
-        Invoke embedding model with potentially multimodal inputs.
-        This method delegates to _invoke for processing.
+        Invoke embedding model with multimodal (text + image) inputs.
+
+        The wire format is selected via the ``multimodal_embedding_format``
+        credential, because there is no single OpenAI-compatible standard for
+        multimodal embeddings:
+
+        - ``vllm_chat`` (default): vLLM's chat-embeddings extension that posts
+          ``{"messages": [...]}`` to ``/embeddings``. Kept as the default for
+          backward compatibility with existing deployments.
+        - ``input_objects``: the Jina/CLIP-style ``{"input": [{"text": ...},
+          {"image": ...}]}`` shape used by Jina, SiliconFlow, Infinity, etc.
+
+        :param inputs: a list of ``MultiModalContent`` documents (SDK multimodal
+            path) or, for legacy callers, content-part lists / plain strings.
         """
-        # Convert inputs back to texts format and use _invoke
+        fmt = credentials.get("multimodal_embedding_format", "vllm_chat")
+        if fmt == "input_objects":
+            return self._embed_multimodal_input_objects(
+                model, credentials, inputs, user, input_type
+            )
+
+        # Default vllm_chat path: convert inputs to the marker-text format that
+        # _invoke / _embed_multimodal_via_chat already understand.
         texts = []
         for input_data in inputs:
             if isinstance(input_data, list):
@@ -791,3 +811,144 @@ class OpenAITextEmbeddingModel(OAICompatEmbeddingModel):
                 )
 
         return self._invoke(model, credentials, texts, user, input_type)
+
+    def _embed_multimodal_input_objects(
+        self,
+        model: str,
+        credentials: dict,
+        inputs: list,
+        user: Optional[str] = None,
+        input_type: EmbeddingInputType = EmbeddingInputType.DOCUMENT,
+    ) -> MultiModalEmbeddingResult:
+        """
+        Embed multimodal inputs using the Jina/CLIP-style request shape:
+
+            {"model": ..., "input": [{"text": "..."}, {"image": "..."}]}
+
+        Each input document produces one embedding (1:1), matching the standard
+        OpenAI ``data[].embedding`` response. Images are normalized to a data URI
+        (or kept as an http(s) URL), which Jina, SiliconFlow and Infinity accept.
+        """
+        endpoint_url = credentials.get("endpoint_url", "").rstrip("/")
+        api_key = credentials.get("api_key", "")
+        endpoint_model_name = credentials.get("endpoint_model_name", "") or model
+        max_chunks = self._get_max_chunks(model, credentials)
+        encoding_format = _get_encoding_format(credentials)
+        prefix = self._get_prefix(credentials, input_type)
+
+        # Build one input object per document.
+        input_objects: list[dict] = []
+        for item in inputs:
+            text, image = self._extract_text_and_image(item)
+            if image:
+                input_objects.append({"image": image})
+            else:
+                text = f"{prefix} {text}" if prefix else text
+                input_objects.append({"text": text})
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}" if api_key else "",
+        }
+
+        all_embeddings: list[list[float]] = [[] for _ in input_objects]
+        used_tokens = 0
+        total_price = 0.0
+        unit_price = 0.0
+        price_unit = 0.0
+        currency = "USD"
+
+        try:
+            for start in range(0, len(input_objects), max_chunks):
+                batch = input_objects[start : start + max_chunks]
+                payload: dict[str, Any] = {
+                    "model": endpoint_model_name,
+                    "input": batch,
+                }
+                if encoding_format:
+                    payload["encoding_format"] = encoding_format
+
+                response = requests.post(
+                    f"{endpoint_url}/embeddings",
+                    headers=headers,
+                    json=payload,
+                    timeout=60,
+                )
+
+                if response.status_code != 200:
+                    logger.error(
+                        f"Multimodal embedding API Error {response.status_code}: "
+                        f"{response.text[:1000]}"
+                    )
+                response.raise_for_status()
+
+                result = response.json()
+
+                # The response index is 0-based within this request's input
+                # array, so map each embedding back relative to the batch start.
+                for offset, item in enumerate(result["data"]):
+                    position = start + item.get("index", offset)
+                    all_embeddings[position] = item["embedding"]
+
+                usage = result.get("usage") or {}
+                used_tokens += (
+                    usage.get("prompt_tokens") or usage.get("total_tokens") or 0
+                )
+                total_price += usage.get("total_price", 0.0)
+                if "unit_price" in usage:
+                    unit_price = usage.get("unit_price", 0.0)
+                if "price_unit" in usage:
+                    price_unit = usage.get("price_unit", 0.0)
+                if "currency" in usage:
+                    currency = usage.get("currency", "USD")
+
+            return MultiModalEmbeddingResult(
+                model=model,
+                embeddings=all_embeddings,
+                usage=EmbeddingUsage(
+                    tokens=used_tokens,
+                    total_tokens=used_tokens,
+                    unit_price=unit_price,
+                    price_unit=price_unit,
+                    total_price=total_price,
+                    currency=currency,
+                    latency=0.0,
+                ),
+            )
+        except requests.exceptions.RequestException as ex:
+            raise InvokeServerUnavailableError(str(ex))
+        except Exception as ex:
+            raise InvokeError(str(ex))
+
+    def _extract_text_and_image(self, item: Any) -> tuple[str, str]:
+        """
+        Normalize a single multimodal input into (text, image) where exactly one
+        is set. Accepts SDK ``MultiModalContent`` documents, content-part lists,
+        and plain strings.
+
+        :return: (text, image_url) - image_url is a data URI or http(s) URL.
+        """
+        # SDK multimodal path: a MultiModalContent document.
+        if isinstance(item, MultiModalContent):
+            if item.content_type == MultiModalContentType.IMAGE:
+                return "", self._process_image_url(item.content)
+            return item.content, ""
+
+        # Legacy content-part list, e.g. [{"type": "text"|"image_url", ...}].
+        if isinstance(item, list):
+            text_parts = []
+            image = ""
+            for content in item:
+                if not isinstance(content, dict):
+                    continue
+                if content.get("type") == "text":
+                    text_parts.append(content.get("text", ""))
+                elif content.get("type") == "image_url":
+                    image = self._process_image_url(
+                        content.get("image_url", {}).get("url", "")
+                    )
+            if image:
+                return "", image
+            return " ".join(text_parts), ""
+
+        return (item if isinstance(item, str) else str(item)), ""

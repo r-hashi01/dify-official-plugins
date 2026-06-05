@@ -1,6 +1,18 @@
+import base64
 from unittest.mock import MagicMock, patch
 
+from dify_plugin.entities.model.text_embedding import (
+    MultiModalContent,
+    MultiModalContentType,
+)
+
 from models.text_embedding.text_embedding import OpenAITextEmbeddingModel
+
+
+def _png_base64() -> str:
+    # PNG magic bytes + padding so _is_base64_image / format detection succeed.
+    raw = b"\x89PNG\r\n\x1a\n" + b"\x00" * 120
+    return base64.b64encode(raw).decode()
 
 
 def _successful_embedding_response() -> MagicMock:
@@ -91,3 +103,50 @@ def test_multimodal_embedding_sends_endpoint_model_name(mock_create, _mock_opena
 
     assert mock_create.call_args.kwargs["model"] == "qwen3-vl-embedding-8b-awq"
     assert result.embeddings == [[0.4, 0.5, 0.6]]
+
+
+def _input_objects_response() -> MagicMock:
+    response = MagicMock()
+    response.status_code = 200
+    # Returned out of order to verify the index is honored.
+    response.json.return_value = {
+        "data": [
+            {"index": 1, "embedding": [0.7, 0.8]},
+            {"index": 0, "embedding": [0.1, 0.2]},
+        ],
+        "usage": {"total_tokens": 9},
+    }
+    return response
+
+
+@patch.object(OpenAITextEmbeddingModel, "_get_max_chunks", return_value=8)
+@patch("models.text_embedding.text_embedding.requests.post")
+def test_multimodal_input_objects_sends_jina_shape(mock_post, _mock_max_chunks):
+    # input_objects format must POST {"model", "input": [{"text"}|{"image"}]}
+    # with endpoint_model_name, applying the document prefix to text only.
+    mock_post.return_value = _input_objects_response()
+    model = OpenAITextEmbeddingModel(model_schemas=[])
+    png_b64 = _png_base64()
+
+    documents = [
+        MultiModalContent(content="hello", content_type=MultiModalContentType.TEXT),
+        MultiModalContent(content=png_b64, content_type=MultiModalContentType.IMAGE),
+    ]
+
+    result = model._invoke_multimodal(
+        model="Qwen3-VL-Embedding",
+        credentials=_credentials(
+            endpoint_model_name="qwen3-vl-embedding-8b-awq",
+            vision_support="support",
+            multimodal_embedding_format="input_objects",
+            document_prefix="document:",
+        ),
+        inputs=documents,
+    )
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["model"] == "qwen3-vl-embedding-8b-awq"
+    assert payload["input"][0] == {"text": "document: hello"}
+    assert payload["input"][1] == {"image": f"data:image/png;base64,{png_b64}"}
+    # Embeddings are reordered back to input order via the response index.
+    assert result.embeddings == [[0.1, 0.2], [0.7, 0.8]]
